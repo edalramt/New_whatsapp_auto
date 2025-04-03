@@ -6,21 +6,18 @@ import time
 import random
 import pyperclip
 import keyboard
-import threading
 import os
-import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl import load_workbook
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, Border, Side  
 
 #leer la lista de preinscritos:
-archivo_preinscritos = "Preinscritos.xlsx"  # Nombre del archivo de entrada
+archivo_preinscritos = os.path.join("logistics", "Preinscritos.xlsx")  # Nombre del archivo de entrada
 df = pd.read_excel(archivo_preinscritos)
 
 # Verificar si el archivo de "Contactos_enviados.xlsx" existe
-archivo_enviados = "Contactos_enviados.xlsx"
+archivo_enviados = os.path.join("logistics", "Contactos_enviados.xlsx")
 if os.path.exists(archivo_enviados):
     df_enviados = pd.read_excel(archivo_enviados)
 else:
@@ -53,14 +50,18 @@ pdf_paths = {
 
 # Función para verificar si se ha presionado "Esc" o "0"
 def verificar_tecla():
-    global programa_activo
+    global programa_activo, programa_pausado
+    programa_pausado = False
     while programa_activo:
         if keyboard.is_pressed('esc') or keyboard.is_pressed('0'):
-            print("🛑 Programa detenido por el usuario.")
-            programa_activo = False
-            break
+            if not programa_pausado:
+                print("⏸ Programa pausado. Presiona 'Esc' o '0' nuevamente para continuar.")
+                programa_pausado = True
+            else:
+                print("▶ Programa reanudado.")
+                programa_pausado = False
         time.sleep(0.1)
-
+        
 # Función para esperar con variación aleatoria
 def esperar_dinamico(tiempo_min, tiempo_max):
     tiempo_espera = random.uniform(tiempo_min, tiempo_max)
@@ -71,8 +72,11 @@ def normalizar_numero(numero):
     return numero.replace(" ", "")
 
 # Función para verificar si un número es válido
-def validar_numero(numero):
-    if str(numero).isdigit() and len(str(numero)) == 9 and str(numero).startswith("9"):
+def validar_numero(numero, enviados):
+    numero = str(numero).replace(" ", "")
+    if numero in enviados:
+        return "Repetido"
+    if numero.isdigit() and len(numero) == 9 and numero.startswith("9"):
         return "Válido"
     return "Inválido"
 
@@ -105,12 +109,18 @@ def guardar_datos(df, archivo):
         wb.save(archivo)
     except PermissionError:
         print(f"Error: No se puede guardar el archivo {archivo}. Asegúrate de que no esté abierto en otro programa.")
+    except Exception as e:
+        print(f"Error inesperado al guardar {archivo}: {e}")
 
 def main():
+    global programa_pausado
     df_preinscritos = cargar_datos(archivo_preinscritos)
     df_enviados = cargar_datos(archivo_enviados)
+    enviados = df_enviados["Celular"].astype(str).values
 
     for _, row in df_preinscritos.iterrows():
+        while programa_pausado:
+            time.sleep(0.5)  # Esperar mientras el programa está pausado
         nombre = row["Nombre"]  
         apellido_paterno = row["Apellido_Paterno"]
         apellido_materno = row["Apellido_Materno"]
@@ -121,13 +131,11 @@ def main():
         correo = row["Correo"]
 
         # Validar número
-        estado = validar_numero(celular)
+        estado = validar_numero(celular, enviados)
 
         # Si ya se envió antes, lo marcamos como "Repetido"
-        if celular in df_enviados["Celular"].astype(str).values:
-            estado = "Repetido"
-        elif estado == "Válido":
-            estado = enviar_mensaje(nombre, name_programa, celular)
+        if estado == "Válido":
+            estado = enviar_mensaje(nombre, apellido_paterno, apellido_materno, row["Facultad"], programa, name_programa, celular)
 
         # Agregar los datos al DataFrame de enviados
         df_enviados = pd.concat([df_enviados, pd.DataFrame([{
@@ -264,36 +272,49 @@ Si tienes consultas, escríbeme y te ayudaré en lo que necesites.
     pg.click(779, 547)
     esperar_dinamico(1, 4)
 
-    if Facultad == "FCS" or Facultad == "FCE":
-        pdf_path = pdf_paths[Facultad][Programa]
-    elif Facultad == "FCED":
-        pdf_path = pdf_paths["FCED"]["Doctorado"]
-    else:
-        pdf_path = pdf_paths[Facultad]
+    try:
+        if Facultad in pdf_paths:
+            if isinstance(pdf_paths[Facultad], dict):
+                pdf_path = pdf_paths[Facultad].get(Programa, None)
+            else:
+                pdf_path = pdf_paths[Facultad]
+        else:
+            pdf_path = None
 
-    pyperclip.copy(pdf_path)
-    pg.hotkey("ctrl", "v")
-    esperar_dinamico(2, 4)
-    pg.press("enter")
-    esperar_dinamico(1, 6)
-    pg.press("enter")
-    esperar_dinamico(2, 4)
+        if not pdf_path or not os.path.exists(pdf_path):
+            print(f"⚠️ No se encontró el archivo PDF para {Facultad} - {Programa}.")
+            return "Error: PDF no encontrado"
 
-    pyperclip.copy(consulta_mensaje)
-    pg.hotkey("ctrl", "v")
-    esperar_dinamico(1, 5)
-    pg.press("enter")
-    esperar_dinamico(2, 4)
+        pyperclip.copy(pdf_path)
+        pg.hotkey("ctrl", "v")
+        esperar_dinamico(2, 4)
+        pg.press("enter")
+        esperar_dinamico(1, 6)
+        pg.press("enter")
+        esperar_dinamico(2, 4)
 
-    fin_tiempo = time.time()
-    duracion = fin_tiempo - inicio_tiempo
-    print(f"✅ Mensaje enviado a {Celular} en {duracion:.2f} segundos.")
+        pyperclip.copy(consulta_mensaje)
+        pg.hotkey("ctrl", "v")
+        esperar_dinamico(1, 5)
+        pg.press("enter")
+        esperar_dinamico(2, 4)
 
-    if duracion < 37:
-        esperar_dinamico(37 - duracion, 42 - duracion)
+        fin_tiempo = time.time()
+        duracion = fin_tiempo - inicio_tiempo
+        print(f"✅ Mensaje enviado a {Celular} en {duracion:.2f} segundos.")
 
-    pg.hotkey("ctrl", "w")
-    esperar_dinamico(4, 6)
+        if duracion < 37:
+            esperar_dinamico(37 - duracion, 42 - duracion)
+
+        pg.hotkey("ctrl", "w")
+        esperar_dinamico(4, 6)
+        return "Enviado"
+    except FileNotFoundError as e:
+        print(f"❌ Archivo no encontrado: {e}")
+        return "Error: Archivo no encontrado"
+    except Exception as e:
+        print(f"❌ Error al enviar mensaje a {Celular}: {e}")
+        return "Error"
 
 # Ejecutar el script
 if __name__ == "__main__":
