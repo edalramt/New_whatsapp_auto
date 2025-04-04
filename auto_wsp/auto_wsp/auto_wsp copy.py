@@ -7,21 +7,27 @@ import random
 import pyperclip
 import keyboard
 import os
+import threading
+from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl import load_workbook
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 
-#leer la lista de preinscritos:
-archivo_preinscritos = os.path.join("logistics", "Preinscritos.xlsx")  # Nombre del archivo de entrada
-df = pd.read_excel(archivo_preinscritos)
+# Definir rutas de los archivos
+archivo_preinscritos = os.path.join("auto_wsp","auto_wsp", "logistics", "Preinscritos.xlsx")
+archivo_enviados = os.path.join("auto_wsp","auto_wsp", "logistics", "Contactos_enviados.xlsx")
 
 # Verificar si el archivo de "Contactos_enviados.xlsx" existe
-archivo_enviados = os.path.join("logistics", "Contactos_enviados.xlsx")
 if os.path.exists(archivo_enviados):
     df_enviados = pd.read_excel(archivo_enviados)
 else:
-    df_enviados = pd.DataFrame(columns=df.columns.tolist() + ["Revision"])
+    df_enviados = pd.DataFrame(columns=["Nombre", "Apellido_Paterno", "Apellido_Materno", "DNI", "Facultad", "Programa", "Name_Programa", "Celular", "Correo", "Revision"])
+
+# Manejar el caso en que "Preinscritos.xlsx" no exista
+if not os.path.exists(archivo_preinscritos):
+    print(f"Error: El archivo '{archivo_preinscritos}' no existe. Por favor, verifica la ruta o crea el archivo.")
+    exit()
 
 # Ruta de Chrome
 ruta_chrome = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
@@ -112,6 +118,35 @@ def guardar_datos(df, archivo):
     except Exception as e:
         print(f"Error inesperado al guardar {archivo}: {e}")
 
+def actualizar_datos(df_nuevos, archivo):
+    """
+    Actualiza un archivo Excel existente con nuevos datos.
+    Si el archivo no existe, lo crea con los datos proporcionados.
+    """
+    try:
+        # Si el archivo existe, cargarlo
+        if os.path.exists(archivo):
+            wb = load_workbook(archivo)
+            ws = wb.active
+
+            # Convertir los nuevos datos a filas
+            for row in dataframe_to_rows(df_nuevos, index=False, header=False):
+                ws.append(row)
+
+        else:
+            # Si el archivo no existe, crearlo con los datos nuevos
+            with pd.ExcelWriter(archivo, engine='openpyxl') as writer:
+                df_nuevos.to_excel(writer, index=False, sheet_name='Contactos')
+
+        # Guardar el archivo actualizado
+        wb.save(archivo)
+        print(f"✅ Archivo actualizado correctamente: {archivo}")
+
+    except PermissionError:
+        print(f"❌ Error: No se puede actualizar el archivo {archivo}. Asegúrate de que no esté abierto en otro programa.")
+    except Exception as e:
+        print(f"❌ Error inesperado al actualizar {archivo}: {e}")
+
 def main():
     global programa_pausado
     df_preinscritos = cargar_datos(archivo_preinscritos)
@@ -125,6 +160,7 @@ def main():
         apellido_paterno = row["Apellido_Paterno"]
         apellido_materno = row["Apellido_Materno"]
         dni = row["DNI"]
+        facultad = row["Facultad"]
         programa = row["Programa"]
         name_programa = row["Name_Programa"]
         celular = str(row["Celular"])  # Convertir a string para evitar errores
@@ -135,24 +171,26 @@ def main():
 
         # Si ya se envió antes, lo marcamos como "Repetido"
         if estado == "Válido":
-            estado = enviar_mensaje(nombre, apellido_paterno, apellido_materno, row["Facultad"], programa, name_programa, celular)
+            estado = enviar_mensaje(nombre, apellido_paterno, apellido_materno, dni, facultad, programa, name_programa, celular)
 
-        # Agregar los datos al DataFrame de enviados
-        df_enviados = pd.concat([df_enviados, pd.DataFrame([{
-            "Nombre": nombre,
-            "Apellido_Paterno": apellido_paterno,
-            "Apellido_Materno": apellido_materno,
-            "DNI": dni,
-            "Facultad": row["Facultad"],
-            "Programa": programa,
-            "Name_Programa": name_programa,
-            "Celular": celular,
-            "Correo": correo,
-            "Revision": estado
-        }])], ignore_index=True)
+        # Evitar duplicados
+        if not df_enviados["Celular"].isin([celular]).any():
+            # Agregar los datos al DataFrame de enviados
+            df_enviados = pd.concat([df_enviados, pd.DataFrame([{
+                "Nombre": nombre,
+                "Apellido_Paterno": apellido_paterno,
+                "Apellido_Materno": apellido_materno,
+                "DNI": dni,
+                "Facultad": facultad,
+                "Programa": programa,
+                "Name_Programa": name_programa,
+                "Celular": celular,
+                "Correo": correo,
+                "Revision": estado
+            }])], ignore_index=True)
 
     # Guardar datos con estilo de tabla
-    guardar_datos(df_enviados, archivo_enviados)
+    actualizar_datos(df_enviados, archivo_enviados)
     print("Proceso finalizado. Los mensajes fueron enviados y registrados.")
 
     
@@ -272,49 +310,37 @@ Si tienes consultas, escríbeme y te ayudaré en lo que necesites.
     pg.click(779, 547)
     esperar_dinamico(1, 4)
 
-    try:
-        if Facultad in pdf_paths:
-            if isinstance(pdf_paths[Facultad], dict):
-                pdf_path = pdf_paths[Facultad].get(Programa, None)
-            else:
-                pdf_path = pdf_paths[Facultad]
-        else:
-            pdf_path = None
+    if Facultad == "FCS" or Facultad == "FCE":
+        pdf_path = pdf_paths[Facultad][Programa]
+    elif Facultad == "FCED":
+        pdf_path = pdf_paths["FCED"]["Doctorado"]
+    else:
+        pdf_path = pdf_paths[Facultad]
+    pyperclip.copy(pdf_path)
+    
+    pg.hotkey("ctrl", "v")
+    esperar_dinamico(2, 4)
+    pg.press("enter")
+    esperar_dinamico(1, 6)
+    pg.press("enter")
+    esperar_dinamico(2, 4)
 
-        if not pdf_path or not os.path.exists(pdf_path):
-            print(f"⚠️ No se encontró el archivo PDF para {Facultad} - {Programa}.")
-            return "Error: PDF no encontrado"
+    pyperclip.copy(consulta_mensaje)
+    pg.hotkey("ctrl", "v")
+    esperar_dinamico(1, 5)
+    pg.press("enter")
+    esperar_dinamico(2, 4)
 
-        pyperclip.copy(pdf_path)
-        pg.hotkey("ctrl", "v")
-        esperar_dinamico(2, 4)
-        pg.press("enter")
-        esperar_dinamico(1, 6)
-        pg.press("enter")
-        esperar_dinamico(2, 4)
+    fin_tiempo = time.time()
+    duracion = fin_tiempo - inicio_tiempo
+    print(f"✅ Mensaje enviado a {Celular} en {duracion:.2f} segundos.")
 
-        pyperclip.copy(consulta_mensaje)
-        pg.hotkey("ctrl", "v")
-        esperar_dinamico(1, 5)
-        pg.press("enter")
-        esperar_dinamico(2, 4)
+    if duracion < 37:
+        esperar_dinamico(37 - duracion, 42 - duracion)
 
-        fin_tiempo = time.time()
-        duracion = fin_tiempo - inicio_tiempo
-        print(f"✅ Mensaje enviado a {Celular} en {duracion:.2f} segundos.")
-
-        if duracion < 37:
-            esperar_dinamico(37 - duracion, 42 - duracion)
-
-        pg.hotkey("ctrl", "w")
-        esperar_dinamico(4, 6)
-        return "Enviado"
-    except FileNotFoundError as e:
-        print(f"❌ Archivo no encontrado: {e}")
-        return "Error: Archivo no encontrado"
-    except Exception as e:
-        print(f"❌ Error al enviar mensaje a {Celular}: {e}")
-        return "Error"
+    pg.hotkey("ctrl", "w")
+    esperar_dinamico(4, 6)
+    return "Enviado"
 
 # Ejecutar el script
 if __name__ == "__main__":
