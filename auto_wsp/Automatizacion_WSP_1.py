@@ -104,16 +104,27 @@ def normalizar_numero(numero):
 
 # Función para verificar si un número es válido
 def validar_numero(numero, enviados):
+    errores = []  # Lista para almacenar los errores
     numero = str(numero).replace(" ", "").strip()  # Eliminar espacios y normalizar
+
     # Validar formato del número
-    if not (numero.isdigit() and len(numero) == 9 and numero.startswith("9")):
-        print(f"❌ El número {numero} es inválido.")
-        return "Inválido"
+    if not numero.isdigit():
+        errores.append("❌ Invalido: No es numérico")
+    if len(numero) < 9:
+        errores.append("❌ Invalido: Menos de 9 dígitos")
+    elif len(numero) > 9:
+        errores.append("❌ Invalido: Más de 9 dígitos")
+    if len(numero) == 9 and not numero.startswith("9"):
+        errores.append("❌ Invalido: No empieza con 9")
+
     # Verificar si el número ya fue enviado
     if numero in enviados:
-        print(f"⭕ El número {numero} ya fue enviado.")
-        return "Repetido"
-    return "Válido"
+        errores.append("⭕ Repetido")
+
+    # Si no hay errores, el número es válido
+    if not errores:
+        return "Válido"
+    return ", ".join(errores)  # Concatenar errores en un solo string
 
 # Función para cargar datos desde Excel
 def cargar_datos(archivo):
@@ -187,7 +198,7 @@ def main():
     global programa_activo, df_enviados  # Declaración global
 
     # Cargar los números ya enviados como una lista
-    enviados = df_enviados["Celular"].astype(str).tolist()
+    enviados = df_enviados["Celular"].astype(str).str.replace(" ", "").str.strip().tolist()
 
     for _, row in df_preinscritos.iterrows():
         if not programa_activo:
@@ -200,14 +211,14 @@ def main():
         facultad = row["Facultad"]
         programa = row["Programa"]
         name_programa = row["Name_Programa"]
-        celular = str(row["Celular"]).strip()  # Convertir a string y eliminar espacios
+        celular = str(row["Celular"]).replace(" ", "").strip()  # Normalizar número
         correo = row["Correo"]
 
         # Validar número
         estado = validar_numero(celular, enviados)
 
-        if estado == "Inválido":
-            print(f"❌ Número inválido: {celular}. Saltando al siguiente.")
+        if estado != "Válido":
+            print(f"❌ {celular} - Errores: {estado}")
             # Registrar el número inválido en el DataFrame de enviados
             df_enviados = pd.concat([df_enviados, pd.DataFrame([{
                 "Nombre": nombre,
@@ -219,11 +230,11 @@ def main():
                 "Name_Programa": name_programa,
                 "Celular": celular,
                 "Correo": correo,
-                "Revision": "Inválido"
+                "Revision": estado  # Registrar los errores aquí
             }])], ignore_index=True)
             continue  # Saltar al siguiente número
 
-        if estado == "Repetido":
+        if celular in enviados:
             print(f"⭕ Número repetido: {celular}. Saltando al siguiente.")
             continue  # Saltar al siguiente número
 
@@ -241,7 +252,7 @@ def main():
             "Name_Programa": name_programa,
             "Celular": celular,
             "Correo": correo,
-            "Revision": estado
+            "Revision": estado  # Registrar el estado como "Enviado"
         }])], ignore_index=True)
 
         # Agregar el número a la lista de enviados
@@ -365,9 +376,9 @@ Si tienes consultas, escríbeme y te ayudaré en lo que necesites.
     esperar_dinamico(2, 3)
     pg.press("enter")
 
-    pg.click(763, 994)
+    pg.click(738, 987)
     esperar_dinamico(2, 3)
-    pg.click(823, 599)
+    pg.click(772, 542)
     esperar_dinamico(1, 4)
 
     if Facultad == "FCS" or Facultad == "FCE":
@@ -404,6 +415,12 @@ Si tienes consultas, escríbeme y te ayudaré en lo que necesites.
 
 # Ejecutar el script
 if __name__ == "__main__":
+
+    if os.path.exists(archivo_enviados):
+        df_enviados = pd.read_excel(archivo_enviados)
+    else:
+        df_enviados = pd.DataFrame(columns=columnas)
+        
     # Iniciar el hilo para verificar las teclas
     hilo_teclas = threading.Thread(target=verificar_tecla, daemon=True)
     hilo_teclas.start()
@@ -411,4 +428,4 @@ if __name__ == "__main__":
     # Ejecutar la función principal
     main()
 
-    print("El programa ha terminado.")
+    print("El programa ha terminado exitosamente ......")
